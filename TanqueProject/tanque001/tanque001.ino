@@ -65,15 +65,13 @@ float Angle[2];
 float currentVolume;
 
 float currentConsumption;
+float accumConsumption;
 ////////////////////////////////////////
-
-
 bool ledDebugState;
-
 ////////////////////////////////////////
 int alertState;
 //------------------------------
-//   alerState |      mean
+//   alertState |      mean
 //------------------------------
 //       0     | Nothing, all ok
 //       1     | Alert shotted
@@ -141,6 +139,9 @@ void initAllConnectionsAndVariables() {
     currentLatitude = 0;
     currentLongitude = 0;
 
+    currentConsumption = 0;
+    accumConsumption = 0;
+    
     alertState = 0;
 
     ticksCount = 0;
@@ -345,14 +346,31 @@ void stateMachineStep() {
             Serial.println("Alert Activated");
             #endif
 
+            if (alertState == 1) {
+                 #ifdef DEBUG_MODE
+                Serial.println("Alert type 001");
+                #endif
+
+                sendAlertToBoss();
+
+                alertState = 0;
+            }else if(alertState == 2) {
+              //...
+              #ifdef DEBUG_MODE
+              Serial.println("Alert type 002");
+              #endif
+            }
+            //...
         }
 
     
     }else if (currentState == 2) {
         #ifdef DEBUG_MODE
         Serial.println("Into state s2");
-        #endif
+        Serial.println("Refreshing the consumption...");
 
+        #endif
+        refreshConsumption(true);
 
     }else if (currentState == 3) {
         #ifdef DEBUG_MODE
@@ -385,11 +403,13 @@ void stateMachineStep() {
     Serial.print("Volume: "); Serial.println(currentVolume);
     Serial.print("Speed: "); Serial.println(speedKmh);
     Serial.print("Angles: "); Serial.print(Angle[0]); Serial.print(", "); Serial.println(Angle[1]);
+    Serial.print("Consumption: "); Serial.println(currentConsumption);
+
     #endif
 }
 
 void saveCurrentStateintoSD() {
-    String header = "rawHeight, Height, GPS:Latitude, GPS:Longitude, GPS:Speed, Angles:0, Angle:1, Volume";
+    String header = "rawHeight, Height, GPS:Latitude, GPS:Longitude, GPS:Speed, Angles:0, Angle:1, Volume, Consumption";
     String data = "";
 
     int raw = analogRead(ultrasonicAnalogPin);
@@ -409,6 +429,8 @@ void saveCurrentStateintoSD() {
     data += String(Angle[1]);
     data += ",";
     data += String(currentVolume);
+    data += ",";
+    data += String(currentConsumption);
 
     File dataFile = SD.open("Datalog.csv", FILE_WRITE);
 
@@ -450,13 +472,19 @@ bool sendSMSLowLevel(String message) {
 
 void refreshConsumption(bool param1) {
     //param1 describe the kind of function aproximate 
-    
-    currentConsumption = currentVolume/speedKmh;
+    if (param1) {
+        currentConsumption = currentVolume/speedKmh; // For Repair
 
-    if (currentConsumption>consumptionThreshold) {
-        alertState = 1;
+        if (currentConsumption>consumptionThreshold) {
+            alertState = 1;
+        }
+        // Complete this part
+    }else{
+        
+        //alertState = int(func(currentConsumption));
+
     }
-    // Complete this part
+   
 
 
 }
