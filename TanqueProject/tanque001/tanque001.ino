@@ -31,7 +31,7 @@
 #define Psize 63.0
 
 //////////////// SD CARD ///////////////
-#define chipSelect 4
+#define chipSelect 15
 
 
 ////////////////////////////////////////
@@ -78,9 +78,10 @@ void setup() {
 
 void loop() {
   for (int i=0;i<5;i++) {
-    currentState = i;
-    stateMachineStep();
+      currentState = i;
+      stateMachineStep();
   }
+  
   delay(100);
 }
 
@@ -108,6 +109,10 @@ void initAllConnectionsAndVariables() {
     fona.begin(fonaSerial);
     fona.enableGPS(true);
     fona.enableGPRS(true);
+
+    SPI.setMISO(12);
+    SPI.setMOSI(11);  
+    SPI.setSCK(13); 
 
     if (!SD.begin(chipSelect)) {
         Serial.println("Card failed, or not present");
