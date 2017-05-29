@@ -235,14 +235,38 @@ void getSpeed() {
 
 void stateMachineStep() {
   if (currentState == 0) {
+      #ifdef DEBUG_MODE
+      Serial.println("Into state s0");
+      #endif
+
       getCurrentHeight();
+      
     }else if (currentState == 1) {
+      #ifdef DEBUG_MODE
+      Serial.println("Into state s1");
+      #endif
+
       getAllAngles();
+    
     }else if (currentState == 2) {
+      #ifdef DEBUG_MODE
+      Serial.println("Into state s2");
+      #endif
+
       getCurrentFuel(true);
+
     }else if (currentState == 3) {
+      #ifdef DEBUG_MODE
+      Serial.println("Into state s3");
+      #endif
+
       getSpeed();
+
     }else if (currentState == 4) {
+      #ifdef DEBUG_MODE
+      Serial.println("Into state s4");
+      #endif
+
       digitalWrite(ledDebug, ledDebugState xor true);
       delay(10);
     }
