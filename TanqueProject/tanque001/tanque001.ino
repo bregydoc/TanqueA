@@ -4,6 +4,10 @@
 #include <math.h>
 #include "Adafruit_FONA.h"
 
+#include <SD.h>
+#include <SPI.h>
+
+
 #define DEBUG_MODE  
 
 #define fonaSerial Serial1
@@ -14,7 +18,6 @@
 #define heightFilterCorrect 5.0
 
 #define ultrasonicAnalogPin 17
-#define ledDebug 13
 
 #define MPU 0x68
 
@@ -27,11 +30,16 @@
 #define Nsize 58.5
 #define Psize 63.0
 
+//////////////// SD CARD ///////////////
+#define chipSelect 4
 
+
+////////////////////////////////////////
 ////////////////////////////////////////
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
 float speedKmh;
+float currentLatitude, currentLongitude;
 
 ////////////////////////////////////////
 
@@ -55,13 +63,14 @@ bool ledDebugState;
 ///////  FUNCTIONS  PROTOTYPES  ////////
 void initAllConnectionsAndVariables();
 void checkNetworkStatus();
-void activateGpsAndGprs();
 float simpleFilter(float lastValue, float currentValue);
 void getGPRS();
 void initMPU6050();
 void getCurrentHeight();
 void getCurrentvolume();
 void getCurrentFuel(bool type);
+
+void saveCurrentStateintoSD();
 
 void setup() {
   initAllConnectionsAndVariables();
@@ -81,48 +90,46 @@ void loop() {
 
 void initAllConnectionsAndVariables() {
 
-  ledDebugState = true;
+    ledDebugState = true;
     firstStart = true;
     currentHeight = -1;
     currentState = -1;
     currentVolume = 0;
 
-    speedKmh = 0; 
+    speedKmh = 0;
+    currentLatitude = 0;
+    currentLongitude = 0;
 
     initMPU6050();
   
-    activateGpsAndGprs();
-
     pinMode(ultrasonicAnalogPin, INPUT);
-
-    pinMode(ledDebug, OUTPUT);
-
 
     fonaSerial.begin(4800);
     fona.begin(fonaSerial);
     fona.enableGPS(true);
+    fona.enableGPRS(true);
 
+    if (!SD.begin(chipSelect)) {
+        Serial.println("Card failed, or not present");
+    }else{
+        Serial.println("card initialized.");
+    }
 
 }
 
 
 void initMPU6050() {
-  Wire.begin();
-  Wire.beginTransmission(MPU);
-  Wire.write(0x6B);
-  Wire.write(0);
-  Wire.endTransmission(true);
-}
-
-void activateGpsAndGprs() {
-  //fona.enableGPS(true);
-  //fona.enableGPRS(true);
+    Wire.begin();
+    Wire.beginTransmission(MPU);
+    Wire.write(0x6B);
+    Wire.write(0);
+    Wire.endTransmission(true);
 }
 
 
 
 float simpleFilter(float lastValue, float currentValue) {
-  float delta = currentValue - lastValue;
+    float delta = currentValue - lastValue;
   
     if (delta < 0) {
       delta = delta * -1;
@@ -136,28 +143,28 @@ float simpleFilter(float lastValue, float currentValue) {
 }
 
 void getCurrentHeight() {
-  /*
-  if (firstStart) {
-    
-  }
-  */
+    /*
+    if (firstStart) {
+      
+    }
+    */
 
-  #ifdef DEBUG_MODE
+    #ifdef DEBUG_MODE
     Serial.println("Getting current height");
     #endif
 
     if (millis()<10000) {
-      currentHeight = -1.;
+        currentHeight = -1.;
     }else{
-      int read = analogRead(ultrasonicAnalogPin);
+        int read = analogRead(ultrasonicAnalogPin);
 
-      float lastHeight = currentHeight;
+        float lastHeight = currentHeight;
 
-      float dist = 0.5758*read;
-      currentHeight = 103. - dist;
+        float dist = 0.5758*read;
+        currentHeight = 103. - dist;
 
-      currentHeight = simpleFilter(lastHeight, currentHeight);
-  }
+        currentHeight = simpleFilter(lastHeight, currentHeight);
+    }
 }
 
 
@@ -207,13 +214,13 @@ void getAllAngles() {
 
 void getCurrentFuel(bool type) { 
   if (type) {
-    currentVolume = Msize*currentHeight*Nsize;
+      currentVolume = Msize*currentHeight*Nsize;
   }else {
 
-    float part1 = (pow(currentHeight, 2) * cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
-    float part2 = (pow(currentHeight, 2) * cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
+      float part1 = (pow(currentHeight, 2) * cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
+      float part2 = (pow(currentHeight, 2) * cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
 
-    currentVolume = (part1*part2*2*currentHeight*cos(Angle[0]))/(-1*(2*currentHeight*cos(Angle[0])-Msize)*currentHeight);
+      currentVolume = (part1*part2*2*currentHeight*cos(Angle[0]))/(-1*(2*currentHeight*cos(Angle[0])-Msize)*currentHeight);
   }
 
 
@@ -222,61 +229,111 @@ void getCurrentFuel(bool type) {
 
 
 void getSpeed() {
-  float latitude, longitude, heading, altitude, speed_kph;
+    float heading, altitude, speed_kph;
 
-  bool gpsSuccess = fona.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude);
+    bool gpsSuccess = fona.getGPS(&currentLatitude, &currentLongitude, &speed_kph, &heading, &altitude);
 
-  if (gpsSuccess) {
-    speedKmh = speed_kph;
-  }
+    if (gpsSuccess) {
+        speedKmh = speed_kph;
+    }
 
 } 
 
 
 void stateMachineStep() {
-  if (currentState == 0) {
-      #ifdef DEBUG_MODE
-      Serial.println("Into state s0");
-      #endif
+    if (currentState == 0) {
+        #ifdef DEBUG_MODE
+        Serial.println("Into state s0");
+        #endif
 
-      getCurrentHeight();
-      
+        getCurrentHeight();
+        
     }else if (currentState == 1) {
-      #ifdef DEBUG_MODE
-      Serial.println("Into state s1");
-      #endif
+        #ifdef DEBUG_MODE
+        Serial.println("Into state s1");
+        #endif
 
-      getAllAngles();
+        getAllAngles();
     
     }else if (currentState == 2) {
-      #ifdef DEBUG_MODE
-      Serial.println("Into state s2");
-      #endif
+        #ifdef DEBUG_MODE
+        Serial.println("Into state s2");
+        #endif
 
-      getCurrentFuel(true);
+        getCurrentFuel(true);
 
     }else if (currentState == 3) {
-      #ifdef DEBUG_MODE
-      Serial.println("Into state s3");
-      #endif
+        #ifdef DEBUG_MODE
+        Serial.println("Into state s3");
+        #endif
 
-      getSpeed();
+        getSpeed();
 
     }else if (currentState == 4) {
-      #ifdef DEBUG_MODE
-      Serial.println("Into state s4");
-      #endif
+        #ifdef DEBUG_MODE
+        Serial.println("Into state s4");
+        #endif
 
-      digitalWrite(ledDebug, ledDebugState xor true);
-      delay(10);
+        //digitalWrite(ledDebug, ledDebugState xor true);
+        //delay(10);
+    }else if(currentState == 5) {
+        #ifdef DEBUG_MODE
+        Serial.println("Save the package into SD");
+        #endif
+        saveCurrentStateintoSD();
+        delay(100);
     }
 
+
     #ifdef DEBUG_MODE
+    Serial.print("Raw Height: "); Serial.println(analogRead(ultrasonicAnalogPin));
+
     Serial.print("Height: "); Serial.println(currentHeight);
     Serial.print("Volume: "); Serial.println(currentVolume);
     Serial.print("Speed: "); Serial.println(speedKmh);
-
+    Serial.print("Angles: "); Serial.print(Angle[0]); Serial.print(", "); Serial.println(Angle[1]);
     #endif
+}
+
+void saveCurrentStateintoSD() {
+    String header = "rawHeight, Height, GPS:Latitude, GPS:Longitude, GPS:Speed, Angles:0, Angle:1, Volume";
+    String data = "";
+
+    int raw = analogRead(ultrasonicAnalogPin);
+
+    data += String(raw);
+    data += ",";
+    data += String(currentHeight);
+    data += ",";
+    data += String(currentLatitude);
+    data += ",";
+    data += String(currentLongitude);
+    data += ",";
+    data += String(speedKmh);
+    data += ",";
+    data += String(Angle[0]);
+    data += ",";
+    data += String(Angle[1]);
+    data += ",";
+    data += String(currentVolume);
+
+    File dataFile = SD.open("Datalog.csv", FILE_WRITE);
+
+    if (dataFile) {
+        dataFile.println(data);
+        dataFile.close();
+        #ifdef DEBUG_MODE
+        Serial.println(data);
+        #endif
+    }  
+    else {
+        #ifdef DEBUG_MODE
+        Serial.println("error opening Datalog.csv");
+        #endif
+    } 
+
+
+
 }
 
 
