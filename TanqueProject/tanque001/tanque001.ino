@@ -270,6 +270,13 @@ void stateMachineStep() {
       digitalWrite(ledDebug, ledDebugState xor true);
       delay(10);
     }
+
+    #ifdef DEBUG_MODE
+    Serial.print("Height: "); Serial.println(currentHeight);
+    Serial.print("Volume: "); Serial.println(currentVolume);
+    Serial.print("Speed: "); Serial.println(speedKmh);
+
+    #endif
 }
 
 
