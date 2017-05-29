@@ -30,11 +30,16 @@
 #define Nsize 58.5
 #define Psize 63.0
 
+//////////// STATE MACHINE /////////////
+#define globalClockPeriod 100
+////////////////////////////////////////
+
 //////////////// SD CARD ///////////////
 #define chipSelect 15
-
-
 ////////////////////////////////////////
+
+#define consumptionThreshold 100.0  
+#define numberMessage "0051957821858"
 ////////////////////////////////////////
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
@@ -45,8 +50,10 @@ float currentLatitude, currentLongitude;
 
 bool firstStart;
 int currentState;
-float currentHeight;
+int ticksCount;
+////////////////////////////////////////
 
+float currentHeight;
 ////////////////////////////////////////
 int16_t AcX, AcY, AcZ, GyX, GyY, GyZ;
 
@@ -56,10 +63,23 @@ float Angle[2];
 
 ////////////////////////////////////////
 float currentVolume;
+
+float currentConsumption;
 ////////////////////////////////////////
+
+
 bool ledDebugState;
 
 ////////////////////////////////////////
+int alertState;
+//------------------------------
+//   alerState |      mean
+//------------------------------
+//       0     | Nothing, all ok
+//       1     | Alert shotted
+//------------------------------
+////////////////////////////////////////
+
 ///////  FUNCTIONS  PROTOTYPES  ////////
 void initAllConnectionsAndVariables();
 void checkNetworkStatus();
@@ -69,10 +89,16 @@ void initMPU6050();
 void getCurrentHeight();
 void getCurrentvolume();
 void getCurrentFuel(bool type);
-void get
+bool sendSMSLowLevel();
 void saveCurrentStateintoSD();
+void refreshConsumption(bool param1);
+void sendAlertToBoss();
 
 void setup() {
+    #ifdef DEBUG_MODE
+    Serial.begin(9600);
+    #endif
+
     initAllConnectionsAndVariables();
     
     firstStart = true;
@@ -92,7 +118,12 @@ void loop() {
         stateMachineStep();
     }
 
-    delay(100);
+    delay(globalClockPeriod);
+
+    ticksCount += 1;
+    if (ticksCount>10000) {
+        ticksCount = 0;
+    }
 }
 
 
@@ -109,6 +140,10 @@ void initAllConnectionsAndVariables() {
     speedKmh = 0;
     currentLatitude = 0;
     currentLongitude = 0;
+
+    alertState = 0;
+
+    ticksCount = 0;
 
     initMPU6050();
   
@@ -208,7 +243,7 @@ void getAllAngles() {
     AcX = Wire.read()<<8|Wire.read();
     AcY = Wire.read()<<8|Wire.read();
     AcZ = Wire.read()<<8|Wire.read();
- 
+    //01000110100000000 or 10101101 -> 01000110110101101 
 
     Acc[1] = atan(-1*(AcX/A_R)/sqrt(pow((AcY/A_R), 2)+pow((AcZ/A_R), 2)))*ratioDegToRad; //*RAD_TO_DEG; // 
     Acc[0] = atan((AcY/A_R)/sqrt(pow((AcX/A_R), 2)+pow((AcZ/A_R), 2)))*ratioDegToRad; //*RAD_TO_DEG;
@@ -233,8 +268,8 @@ void getCurrentFuel(bool type) {
       currentVolume = Msize*currentHeight*Nsize;
   }else {
 
-      float part1 = (pow(currentHeight, 2) * cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
-      float part2 = (pow(currentHeight, 2) * cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
+      float part1 = (pow(currentHeight, 2)*cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
+      float part2 = (pow(currentHeight, 2)*cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
 
       currentVolume = (part1*part2*2*currentHeight*cos(Angle[0]))/(-1*(2*currentHeight*cos(Angle[0])-Msize)*currentHeight);
   }
@@ -263,7 +298,7 @@ void getSpeed() {
             if (gsmlocSuccess) {
                 currentLatitude = latitude;
                 currentLongitude = longitude;
-                speedKmh = speed_kph;
+                 speedKmh = speed_kph;
 
             }else{
                 #ifdef DEBUG_MODE
@@ -290,31 +325,40 @@ void getSpeed() {
 void stateMachineStep() {
     if (currentState == 0) {
         #ifdef DEBUG_MODE
-        Serial.println("Into state s0");
+        Serial.println("Into state s0, refreshing height, angles, fuel(volume) and speed");
         #endif
 
         getCurrentHeight();
+        getAllAngles();
+        getCurrentFuel(true);
+        getSpeed();
+
+
         
     }else if (currentState == 1) {
         #ifdef DEBUG_MODE
         Serial.println("Into state s1");
         #endif
 
-        getAllAngles();
+        if (alertState != 0) {
+            #ifdef DEBUG_MODE
+            Serial.println("Alert Activated");
+            #endif
+
+        }
+
     
     }else if (currentState == 2) {
         #ifdef DEBUG_MODE
         Serial.println("Into state s2");
         #endif
 
-        getCurrentFuel(true);
 
     }else if (currentState == 3) {
         #ifdef DEBUG_MODE
         Serial.println("Into state s3");
         #endif
 
-        getSpeed();
 
     }else if (currentState == 4) {
         #ifdef DEBUG_MODE
@@ -323,12 +367,14 @@ void stateMachineStep() {
 
         //digitalWrite(ledDebug, ledDebugState xor true);
         //delay(10);
+
     }else if(currentState == 5) {
         #ifdef DEBUG_MODE
-        Serial.println("Save the package into SD");
+        Serial.println("--------- Save the package into SD ---------");
         #endif
-        saveCurrentStateintoSD();
-        delay(100);
+        if ((ticksCount*globalClockPeriod) % 1000 == 0) {
+            saveCurrentStateintoSD();
+        }
     }
 
 
@@ -378,6 +424,60 @@ void saveCurrentStateintoSD() {
         Serial.println("error opening Datalog.csv");
         #endif
     } 
+
+}
+
+
+bool sendSMSLowLevel(String message) {
+    String sendToString = numberMessage;
+    
+    char sendto[15] = numberMessage;
+    char buffMessage[145];
+
+    message.toCharArray(buffMessage, 145);
+
+    if (!fona.sendSMS(sendto, buffMessage)) {
+        #ifdef DEBUG_MODE
+        Serial.print("Sending message to " + sendToString + " <---\n");
+        #endif
+    }else{
+        #ifdef DEBUG_MODE
+        Serial.print("Failed sending message <---\n");
+        #endif
+    }
+
+}
+
+void refreshConsumption(bool param1) {
+    //param1 describe the kind of function aproximate 
+    
+    currentConsumption = currentVolume/speedKmh;
+
+    if (currentConsumption>consumptionThreshold) {
+        alertState = 1;
+    }
+    // Complete this part
+
+
+}
+
+
+void sendAlertToBoss() {
+    String finalMessage = "";
+    finalMessage += "Angles:" + String(Angle[0]) + "," + String(Angle[1]) + ";";
+    finalMessage += "Lat:" + String(currentLatitude);
+    finalMessage += "Lon:" + String(currentLongitude) + "\n";
+    finalMessage += "Threshold activated, Check it the datalog\n";
+    finalMessage += "MARC project";
+
+
+    #ifdef DEBUG_MODE
+    Serial.println("Final Alert message complied:");
+    Serial.println(finalMessage);
+    #endif
+    
+    sendSMSLowLevel(finalMessage);
+
 
 }
 
