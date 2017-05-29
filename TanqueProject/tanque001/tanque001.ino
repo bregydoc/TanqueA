@@ -69,20 +69,30 @@ void initMPU6050();
 void getCurrentHeight();
 void getCurrentvolume();
 void getCurrentFuel(bool type);
-
+void get
 void saveCurrentStateintoSD();
 
 void setup() {
-  initAllConnectionsAndVariables();
-}
+    initAllConnectionsAndVariables();
+    
+    firstStart = true;
 
-void loop() {
-  for (int i=0;i<5;i++) {
+    for (int i=0;i<6;i++) {
       currentState = i;
       stateMachineStep();
-  }
-  
-  delay(100);
+    }
+
+    firstStart = false;
+}
+
+
+void loop() {
+    for (int i=0;i<6;i++) {
+        currentState = i;
+        stateMachineStep();
+    }
+
+    delay(100);
 }
 
 
@@ -92,7 +102,6 @@ void loop() {
 void initAllConnectionsAndVariables() {
 
     ledDebugState = true;
-    firstStart = true;
     currentHeight = -1;
     currentState = -1;
     currentVolume = 0;
@@ -106,7 +115,9 @@ void initAllConnectionsAndVariables() {
     pinMode(ultrasonicAnalogPin, INPUT);
 
     fonaSerial.begin(4800);
+    
     fona.begin(fonaSerial);
+
     fona.enableGPS(true);
     fona.enableGPRS(true);
 
@@ -234,13 +245,44 @@ void getCurrentFuel(bool type) {
 
 
 void getSpeed() {
-    float heading, altitude, speed_kph;
+    float latitude, longitude, heading, altitude, speed_kph;
 
-    bool gpsSuccess = fona.getGPS(&currentLatitude, &currentLongitude, &speed_kph, &heading, &altitude);
+    bool gpsSuccess = fona.getGPS(&latitude, &currentLongitude, &speed_kph, &heading, &altitude);
 
     if (gpsSuccess) {
+        currentLatitude = latitude;
+        currentLongitude = longitude;
+
         speedKmh = speed_kph;
     }
+
+    if (currentLatitude == 0.0 || currentLongitude == 0.0) {
+         if (fona.getNetworkStatus() == 1) {
+            bool gsmlocSuccess = fona.getGSMLoc(&latitude, &longitude);
+            
+            if (gsmlocSuccess) {
+                currentLatitude = latitude;
+                currentLongitude = longitude;
+                speedKmh = speed_kph;
+
+            }else{
+                #ifdef DEBUG_MODE
+                Serial.println("GSM location failed...");
+                Serial.println(F("Disabling GPRS"));
+                #endif
+                fona.enableGPRS(false);
+                #ifdef DEBUG_MODE
+                Serial.println(F("Enabling GPRS"));
+                if (!fona.enableGPRS(true)) {
+                    Serial.println(F("Failed to turn GPRS on"));  
+                }
+                #endif
+
+            }
+        }
+    }
+
+   
 
 } 
 
@@ -336,8 +378,6 @@ void saveCurrentStateintoSD() {
         Serial.println("error opening Datalog.csv");
         #endif
     } 
-
-
 
 }
 
