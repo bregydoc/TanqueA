@@ -2,19 +2,19 @@
 
 #include <Wire.h>
 #include <math.h>
+#include "Adafruit_FONA.h"
 
 #define DEBUG_MODE  
 
 #define fonaSerial Serial1
+             
 
-#define FONA_RX 1             
-#define FONA_TX 0             
 #define FONA_RST 4            
 
 #define heightFilterCorrect 5.0
 
 #define ultrasonicAnalogPin 17
-#define a 13
+#define ledDebug 13
 
 #define MPU 0x68
 
@@ -26,7 +26,13 @@
 #define Msize 70.0
 #define Nsize 58.5
 #define Psize 63.0
+
+
 ////////////////////////////////////////
+Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
+
+float speedKmh;
+
 ////////////////////////////////////////
 
 bool firstStart;
@@ -43,6 +49,7 @@ float Angle[2];
 ////////////////////////////////////////
 float currentVolume;
 ////////////////////////////////////////
+bool ledDebugState;
 
 ////////////////////////////////////////
 ///////  FUNCTIONS  PROTOTYPES  ////////
@@ -57,11 +64,15 @@ void getCurrentvolume();
 void getCurrentFuel(bool type);
 
 void setup() {
-
+  initAllConnectionsAndVariables();
 }
 
 void loop() {
-
+  for (int i=0;i<5;i++) {
+    currentState = i;
+    stateMachineStep();
+  }
+  delay(100);
 }
 
 
@@ -69,15 +80,28 @@ void loop() {
 
 
 void initAllConnectionsAndVariables() {
-  	firstStart = true;
-  	currentHeight = -1;
-  	currentState = -1;
-  	currentVolume = 0;
-  	initMPU6050();
-  
-  	activateGpsAndGprs();
 
-  	pinMode(ultrasonicAnalogPin, INPUT);
+  ledDebugState = true;
+    firstStart = true;
+    currentHeight = -1;
+    currentState = -1;
+    currentVolume = 0;
+
+    speedKmh = 0; 
+
+    initMPU6050();
+  
+    activateGpsAndGprs();
+
+    pinMode(ultrasonicAnalogPin, INPUT);
+
+    pinMode(ledDebug, OUTPUT);
+
+
+    fonaSerial.begin(4800);
+    fona.begin(fonaSerial);
+    fona.enableGPS(true);
+
 
 }
 
@@ -98,17 +122,17 @@ void activateGpsAndGprs() {
 
 
 float simpleFilter(float lastValue, float currentValue) {
-	float delta = currentValue - lastValue;
+  float delta = currentValue - lastValue;
   
-  	if (delta < 0) {
-    	delta = delta * -1;
-  	}
+    if (delta < 0) {
+      delta = delta * -1;
+    }
 
-  	if (delta > heightFilterCorrect) {
-    	return lastValue;
-  	}else{
-    	return currentValue;
-  	}
+    if (delta > heightFilterCorrect) {
+      return lastValue;
+    }else{
+      return currentValue;
+    }
 }
 
 void getCurrentHeight() {
@@ -118,43 +142,43 @@ void getCurrentHeight() {
   }
   */
 
-	#ifdef DEBUG_MODE
-  	Serial.println("Getting current height");
-  	#endif
+  #ifdef DEBUG_MODE
+    Serial.println("Getting current height");
+    #endif
 
-  	if (millis()<10000) {
-    	currentHeight = -1.;
-  	}else{
-    	int read = analogRead(ultrasonicAnalogPin);
+    if (millis()<10000) {
+      currentHeight = -1.;
+    }else{
+      int read = analogRead(ultrasonicAnalogPin);
 
-    	float lastHeight = currentHeight;
+      float lastHeight = currentHeight;
 
-    	float dist = 0.5758*read;
-    	currentHeight = 103. - dist;
+      float dist = 0.5758*read;
+      currentHeight = 103. - dist;
 
-    	currentHeight = simpleFilter(lastHeight, currentHeight);
-	}
+      currentHeight = simpleFilter(lastHeight, currentHeight);
+  }
 }
 
 
 
 void getAllAngles() {
-  	/*
-  	const forCalc = 57.295791; //180/3.141592
+    /*
+    const forCalc = 57.295791; //180/3.141592
 
-  	arx = forCalc*atan(ax / sqrt(square(ay, 2) + square(az, 2))); 
-  	ary = forCalc*atan(ay / sqrt(square(ax, 2) + square(az, 2)));
-  	arz = forCalc*atan(sqrt(square(ay) + square(ax)) / az);
+    arx = forCalc*atan(ax / sqrt(square(ay, 2) + square(az, 2))); 
+    ary = forCalc*atan(ay / sqrt(square(ax, 2) + square(az, 2)));
+    arz = forCalc*atan(sqrt(square(ay) + square(ax)) / az);
 
-  	rx = (0.1 * arx) + (0.9 * grx);
-  	ry = (0.1 * ary) + (0.9 * gry);
-  	rz = (0.1 * arz) + (0.9 * grz);
+    rx = (0.1 * arx) + (0.9 * grx);
+    ry = (0.1 * ary) + (0.9 * gry);
+    rz = (0.1 * arz) + (0.9 * grz);
 
-  	rx = (0.96 * arx) + (0.04 * grx);
-  	ry = (0.96 * ary) + (0.04 * gry);
-  	rz = (0.96 * arz) + (0.04 * grz);
-  	*/
-  	Wire.beginTransmission(MPU);
+    rx = (0.96 * arx) + (0.04 * grx);
+    ry = (0.96 * ary) + (0.04 * gry);
+    rz = (0.96 * arz) + (0.04 * grz);
+    */
+    Wire.beginTransmission(MPU);
     Wire.write(0x3B);
     Wire.endTransmission(false);
     Wire.requestFrom(MPU, 6, true);
@@ -182,28 +206,46 @@ void getAllAngles() {
 }
 
 void getCurrentFuel(bool type) { 
-	if (type) {
-		currentVolume = Msize*currentHeight*Nsize;
-	}else {
+  if (type) {
+    currentVolume = Msize*currentHeight*Nsize;
+  }else {
 
-		float part1 = (pow(currentHeight, 2) * cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
-		float part2 = (pow(currentHeight, 2) * cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
+    float part1 = (pow(currentHeight, 2) * cos(Angle[0]))/2 + pow(Msize, 2)/8*cos(Angle[0]) + currentHeight*Msize/2;
+    float part2 = (pow(currentHeight, 2) * cos(Angle[1]))/2 + pow(Nsize, 2)/8*cos(Angle[1]) + currentHeight*Nsize/2;
 
-		currentVolume = (part1*part2*2*currentHeight*cos(Angle[0]))/(-1*(2*currentHeight*cos(Angle[0])-Msize)*currentHeight);
-	}
+    currentVolume = (part1*part2*2*currentHeight*cos(Angle[0]))/(-1*(2*currentHeight*cos(Angle[0])-Msize)*currentHeight);
+  }
 
 
-}
+} 
+
+
+
+void getSpeed() {
+  float latitude, longitude, heading, altitude, speed_kph;
+
+  bool gpsSuccess = fona.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude);
+
+  if (gpsSuccess) {
+    speedKmh = speed_kph;
+  }
+
+} 
 
 
 void stateMachineStep() {
-	if (currentState == 0) {
-    	getCurrentHeight();
-  	}else if (currentState == 1) {
-    	getAllAngles();
-  	}else if (currentState == 2) {
-  		getCurrentFuel(true);
-  	}
+  if (currentState == 0) {
+      getCurrentHeight();
+    }else if (currentState == 1) {
+      getAllAngles();
+    }else if (currentState == 2) {
+      getCurrentFuel(true);
+    }else if (currentState == 3) {
+      getSpeed();
+    }else if (currentState == 4) {
+      digitalWrite(ledDebug, ledDebugState xor true);
+      delay(10);
+    }
 }
 
 
